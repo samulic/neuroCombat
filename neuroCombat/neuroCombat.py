@@ -13,7 +13,8 @@ def neuroCombat(data,
                 covars,
                 batch_col,
                 discrete_cols=None,
-                continuous_cols=None):
+                continuous_cols=None,
+                parametric=True):
     """
     Run ComBat to correct for batch effects in neuroimaging data
 
@@ -37,6 +38,9 @@ def neuroCombat(data,
     continuous_cols : string or list of strings
         - variables which are continous that you want to predict
         - e.g. depression sub-scores
+    parametric: boolean
+        - flag to compute parametric form of the model
+        - e.g. False no assumptions are made regarding the laws followed by the parameters
 
     Returns
     -------
@@ -103,8 +107,8 @@ def neuroCombat(data,
     LS_dict = fit_LS_model_and_find_priors(s_data, design, info_dict)
 
     # find parametric adjustments
-    print('Finding parametric adjustments..')
-    gamma_star, delta_star = find_parametric_adjustments(s_data, LS_dict, info_dict)
+    print('Finding adjustments..')
+    gamma_star, delta_star = find_adjustments(s_data, LS_dict, info_dict, parametric)
 
     # adjust data
     print('Final adjustment of data..')
@@ -231,18 +235,50 @@ def it_sol(sdat, g_hat, d_hat, g_bar, t2, a, b, conv=0.0001):
         count = count + 1
     adjust = (g_new, d_new)
     return adjust 
+  
 
-def find_parametric_adjustments(s_data, LS, info_dict):
+def int_eprior (sdat, g_hat, d_hat):
+    g_star, d_star = None, None
+    r = sdat.shape[0]
+    for i in range(r):
+        g = g_hat.drop(g_hat.index[i])
+        d = d_hat.drop(d_hat.index[i])
+        x = sdat[i,~np.isnan(sdat[i,])]
+        n = len(x)
+        j = n+1
+        # dat <- matrix(as.numeric(x), length(g), n, byrow=TRUE)
+        dat = x.reshape(len(g), n)
+        resid2 = (dat-g) ** 2
+        sum2 <- resid2.dot(j)
+        LH <- 1/(2 * np.pi * d) ** (n/2) * exp(-sum2/(2*d))
+        np.nan_to_num(LH, copy=False)
+        g.star <- c(g.star, np.sum(g*LH)/np.sum(LH))
+        d.star <- c(d.star, np.sum(d*LH)/np.sum(LH))
+        ## if(i%%1000==0){cat(i,'\n')}
+    }
+    adjust <- (g.star, d.star)
+    return adjust	
+ 
+def find_adjustments(s_data, LS, info_dict, parametric=True):
     batch_info  = info_dict['batch_info'] 
 
     gamma_star, delta_star = [], []
-    for i, batch_idxs in enumerate(batch_info):
-        temp = it_sol(s_data[:,batch_idxs], LS['gamma_hat'][i],
-                    LS['delta_hat'][i], LS['gamma_bar'][i], LS['t2'][i], 
-                    LS['a_prior'][i], LS['b_prior'][i])
+    if (parametric):
+        for i, batch_idxs in enumerate(batch_info):
+            temp = it_sol(s_data[:,batch_idxs], LS['gamma_hat'][i],
+                        LS['delta_hat'][i], LS['gamma_bar'][i], LS['t2'][i], 
+                        LS['a_prior'][i], LS['b_prior'][i])
 
-        gamma_star.append(temp[0])
-        delta_star.append(temp[1])
+            gamma_star.append(temp[0])
+            delta_star.append(temp[1])
+     else:
+         for i, batch_idxs in enumerate(batch_info):
+            temp = int_eprior(s_data[:,batch_idxs], LS['gamma_hat'][i],
+                        LS['delta_hat'][i])
+          
+            gamma_star.append(temp[0])
+            delta_star.append(temp[1])
+
 
     return np.array(gamma_star), np.array(delta_star)
 
